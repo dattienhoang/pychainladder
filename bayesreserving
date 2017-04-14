@@ -1,0 +1,120 @@
+import math,os
+import pymc3 as pm
+import seaborn as sns
+import numpy as np
+import pandas as pd
+from theano import tensor as tt
+# from scipy.stats import lognorm,uniform,norm
+
+## The Leveled Chain Ladder Model (LCL)
+
+# Premimum_w and C_gt_w_d are inputs that should be entered one by one. 
+Premium = np.random.rand(25,1)
+C_gt = test
+alpha = np.zeros((25,1))
+beta = np.zeros((25,1))
+# C_gt[w][d] = np.ones((1,1))
+
+
+LCL_model = pm.Model()
+with LCL_model:
+    for w in range(25):
+        for d in range(25-w):
+            loglr = pm.Uniform('nu',-1,0.5)
+            alpha_w = pm.Normal(name='mu', mu=math.log(Premium[w])+loglr, sd=math.sqrt(10))
+
+            beta_d = pm.Uniform('nu2',-5,5)
+
+            a_i = pm.Uniform('nu3',0,1)
+            sigma_d = tt.sum(a_i)
+
+            mu_w_d = alpha_w + beta_d
+            C_pred_w_d = pm.Lognormal('sigma',mu_w_d,sigma_d)
+            likelihood = pm.Normal('y',C_pred_w_d,observed=C_gt[w][d])
+
+            start = pm.find_MAP()
+            step = pm.NUTS(scaling=start)
+            trace = pm.sample(2000,step,start=start,progressbar=True
+            
+## The Correlated Chain Ladder Model (CCL)
+
+# Premimum_w and C_gt_w_d are inputs that should be entered one by one. 
+Premium_w = np.ones((1,1))
+C_gt_w_d = np.ones((1,1))
+
+
+LCL_model = pm.Model()
+with LCL_model:
+    loglr = pm.Uniform('nu',-1,0.5)
+    alpha_w = pm.Normal(name='mu', mu=math.log(Premium_w)+loglr, sd=math.sqrt(10))
+
+    beta_d = pm.Uniform('nu2',-5,5)
+
+    a_i = pm.Uniform('nu3',0,1)
+    sigma_d=tt.sum(a_i)
+    
+    mu_1_d = alpha_1 + beta_d
+    mu_w_d = alpha_w + beta_d + rho*(math.log(C_w_1d)-mu_w1_d)
+    C_pred_w_d = pm.Lognormal('sigma',mu_w_d,sigma_d)
+    likelihood = pm.Normal('y',C_pred_w_d,observed=C_gt_w_d)
+    
+    start = pm.find_MAP()
+    step = pm.NUTS(scaling=start)
+    trace = pm.sample(2000,step,start=start,progressbar=True)
+
+###############
+# paid model
+
+# in future, write something to detect this from triangle dimensions
+w = np.arange(0, 5)#accper = np.arange(0, 5)
+d = np.arange(0, 5)#devper = np.arange(0, 5)
+Premium_w = 1000
+Premiums = [1000,1000,1000,1000,1000]
+
+# Resources:
+# http://stackoverflow.com/questions/36045851/pymc3-regression-with-change-point
+# https://stats.stackexchange.com/questions/234337/pymc3-dependencies-between-series-elements
+
+with pm.Model() as CIT_model:
+    # need to define time point...w,d
+    #w = pm.Uniform('w', 1, np.max(accper))
+    #d = pm.Uniform('d', 1, np.max(devper))
+    
+    loglr = pm.Uniform('loglr', -5, 1)
+    
+    alpha_w = pm.Normal('alpha_w', mu=math.log(Premium_w)+loglr, sd=math.sqrt(10))
+    
+    beta_d_1_4 = pm.Uniform('beta_d_1_4', 0, 10) # if d>1, d<4
+    # Idea:
+    #beta_d_GT4 = pm.Uniform('beta_d_GT4', 0, beta_d_LAG) # if d>4
+    # Just for now....
+    beta_d_GT4 = pm.Uniform('beta_d_GT4', 0, beta_d_1_4) # if d>4
+    switchpoint1 = pm.DiscreteUniform('switchpoint1', lower=devper.min(), upper=devper.max(), testval=1)
+    #beta_d = pm.math.switch(switchpoint >= 1 and switchpoint < 4, beta_d_1_4, beta_d_GT4)
+    beta_d = pm.math.switch(switchpoint1 < 4, beta_d_1_4, beta_d_GT4)
+    
+    rho = pm.Uniform('rho',-1.,1.) #set to zero for LIT model
+    tau = pm.Normal('tau',mu=0,sd=0.0316)
+    
+    sigma2_EQ1 = pm.Uniform('sigma2_EQ1', 0, 0.5)
+    sigma2_GT1 = pm.Uniform('sigma2_GT1', 0, 0.5)
+    sigma2_d = pm.math.switch(devper > 1, sigma2_GT1, sigma2_EQ1)
+    
+    # assuming that premiums vector loaded as "Premiums"
+    delta = pm.Uniform('delta', 0, np.mean(Premiums))
+    
+    mu_w_d = pm.Deterministic('mu_w_d', alpha_w + beta_d + tau*(w+d-1))
+    Z_w_d = pm.Lognormal('Z_w_d', mu_w_d, sigma2_d) # how to enforce constraint?
+    
+    # since we need lagged variables...run sample of C_w_d, then extract from trace backend?
+    # or can we access the 
+    #fix LAG
+    I_pred_EQ1 = pm.Lognormal('I_pred_EQ1', Z_w_d, delta)
+    # Idea:
+    #I_pred_GT1 = pm.Lognormal('I_pred_GT1', Z_w_d + (rho*(I_pred_GT1_LAG - Z_w_d_LAG)*exp(tau)), delta)
+    # Just for now...
+    I_pred_LAG = pm.Lognormal('I_pred_LAG', Z_w_d + (rho*(I_pred_EQ1 - Z_w_d)*pm.math.exp(tau)), delta)
+    I_pred_GT1 = pm.Lognormal('I_pred_GT1', Z_w_d + (rho*(I_pred_LAG - Z_w_d)*pm.math.exp(tau)), delta) 
+    switchpoint2 = pm.DiscreteUniform('switchpoint2', lower=devper.min(), upper=devper.max(), testval=1)
+    I_pred_w_d = pm.math.switch(switchpoint2 > 1, I_pred_GT1, I_pred_EQ1)
+    
