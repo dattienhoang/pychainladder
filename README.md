@@ -15,6 +15,9 @@ in development are some Bayesian stochastic methods from literature:
   - 'non-linear model' (Bayesian MCMC of Clark Cape Cod Model)
 
 References:
+
 [Clark Cape Cod](http://www.casualfellow.com/study-guide.html)
+
 [Bayesian MCMC Reserving Methods](http://www.casact.org/pubs/monographs/index.cfm?fa=meyers-monograph01)
+
 [A Bayesian non-linear model for forecasting insurance loss payments](http://onlinelibrary.wiley.com/doi/10.1111/j.1467-985X.2011.01002.x/full)
