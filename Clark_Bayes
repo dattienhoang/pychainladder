@@ -9,7 +9,7 @@ Created on Tue Jul 11 09:24:05 2017
 import numpy as np
 import pymc3 as pm
 #import theano
-#import theano.tensor as tt
+import theano.tensor as tt
 
 #from datetime import datetime
 
@@ -44,39 +44,43 @@ with pm.Model() as Clark_Bayes:
     log_allks = pm.MvNormal('log_allks', mu=log_gamma_omega_theta, cov=Sigma, shape=3)
     
     # now start describing each company's data in individual accident years
-    log_gamma_ik = pm.Normal('log_gamma_ik', log_allks[0], sig_gamyr**2, shape=1, observed=pm.math.log(obs[len(obs)-1]/Premiums[0]), testval=0.1)#obs[len(obs)-1]/Premiums[0])#testval=0, 
-    #log_gamma_ik = pm.Normal('log_gamma_ik', log_gamma, sig_gamyr**2, shape=1, observed=)#, testval=0)
-    # for now, the shape is 1, because the model is written for an individual AY
+    log_gamma_ik = pm.Normal('log_gamma_ik', log_allks[0], sig_gamyr**2, shape=1, testval=0.1)#, observed=pm.math.log(obs[len(obs)-1]/Premiums[0])
     
     # some more priors at the company-level
     rho = pm.Uniform('rho', -1,1, shape=1, testval=0.9)
     sig_k = pm.Uniform('sig_k', 0, 100, shape=1, testval=0.1)
     
     # finally, let's construct noise of payments in this AY
-    #rho2 = np.zeros(len(obs)) + rho
-    #sig2 = np.zeros(len(obs)) + sig_k
-    #print sig2
-    #print sig2.eval()
     del_ik = pm.Normal('del_ik', 0, (sig_k**2)*(1-(rho**2)), shape=len(obs)) #matches to shape 1!!!
-    #del_ik = pm.Normal('del_ik', 0, (sig2**2)*(1-(rho2**2)), shape=len(obs))
-#    #eps_ik_t0 = pm.Normal('eps_ik_t0', 0, sig_k**2, shape=len(obs))
-#    #AR1 which takes k: the lag effect and tau: the precision.
-#    #this passes without crashing! just make sure tau is set right
-#    s = pm.AR1('s', k=rho, tau_e= 1/((sig_k**2)*(1-(rho**2))), shape=len(obs))
-#    eps_ik = pm.Deterministic('eps_ik', s+del_ik)#, shape=len(obs))
+    #AR1 which takes k: the lag effect and tau: the precision.
+    #this passes without crashing! just make sure tau is set right
+    s = pm.AR1('s', k=rho, tau_e= 1/((sig_k**2)*(1-(rho**2))), shape=len(obs))
+    eps_ik = pm.Deterministic('eps_ik', s+del_ik)#, shape=len(obs))
     
-#    # now construct the payments themselves, for now just for an AY row
-#    # G is a vector representing the growth function
-#    G = [loglogistic(i, pm.math.exp(log_allks[1]), pm.math.exp(log_allks[2])) for i in range(len(obs))]
-#    p = [Premiums[0] for i in range(len(obs))]
-#    mu_ik = np.array([(p[i]*eps_ik[i]*G[i]) + del_ik[i] for i in range(len(obs))])
-#    #mu_ik_res = pm.Deterministic('mu_ik_res', mu_ik*1)#, shape=len(obs))
-#    log_y_ik = pm.Deterministic('y_ik', pm.math.log(mu_ik) + eps_ik)#, observed=pm.math.log(obs))#, shape=len(obs))
+    # now construct the payments themselves, for now just for an AY row
+    # G is a vector representing the growth function
+    #G = np.array([loglogistic(i, pm.math.exp(log_allks[1]), pm.math.exp(log_allks[2])) for i in range(len(obs))])
+    G = tt.zeros(len(obs))
+    for i in range(len(obs)):
+        G = tt.set_subtensor(G[i], loglogistic(i, pm.math.exp(log_allks[1]), pm.math.exp(log_allks[2])))
+    p = np.array([Premiums[0] for i in range(len(obs))])
+    #mu_ik = np.array([(p[i]*eps_ik[i]*G[i]) + del_ik[i] for i in range(len(obs))])
+    mu_ik_res = pm.Deterministic('mu_ik_res', p*eps_ik*G + del_ik)#, shape=len(obs))
+    
+    # HERE: Avg ELBO -53.08 over 200000 init's 
+    
+#    #log_y_ik = pm.Deterministic('y_ik', pm.math.log(mu_ik) + eps_ik)#, observed=pm.math.log(obs))#, shape=len(obs))
 #    # would like to incorporate observed at log_y_ik, but Deterministic can't take observed data
 #    # might need to use Potential
 #    # https://github.com/pymc-devs/pymc3/issues/1971
 #    # https://stats.stackexchange.com/questions/251280/what-is-pm-potential-in-pymc3
-    
+#    # maybe for now, just a very very narrow Normal distribution...
+    #log_y_ik = pm.Normal('log_y_ik', pm.math.log(mu_ik_res) + eps_ik, 100,observed=pm.math.log(np.array(obs)), testval=np.array(obs), shape=len(obs))
+    # ^ Avg ELBO NaN over 200000 init's
+    #y_ik = pm.Normal('log_y_ik', mu_ik_res + eps_ik, 100,observed=np.array(obs), testval=np.array(obs))#, shape=len(obs))
+    # ^ Avg ELBO -283 over 200000 init's
+    y_ik = pm.Normal('log_y_ik', mu_ik_res * pm.math.exp(eps_ik), 100,observed=np.array(obs), testval=np.array(obs))#, shape=len(obs))
+    # ^ Avg ELBO -172 over 200000 init's...37h run!
 
 print 'just did the model, now sample...'
 #with Clark_Bayes:
@@ -110,6 +114,22 @@ try:
 except:
     print 'probably dont have enough samples to make good traceplots...'
 
+#ppc = pm.sample_ppc(trace, samples=500, model=Clark_Bayes, size=100)
+#ax = plt.subplot()
+#import seaborn as sns
+#sns.distplot([n.mean() for n in ppc['log_gamma_ik']], kde=False, ax=ax)
+##ax.axvline(data.mean())
+#ax.set(title='Posterior predictive of the mean', xlabel='mean(x)', ylabel='Frequency');
+
+#import matplotlib.pyplot as plt
+#z = pm.geweke(trace, intervals=15)
+#plt.figure()
+#plt.scatter(z['log_allks'][:][1])
+#plt.scatter(*z['del_ik'])
+#plt.hlines([-1,1], 0, 1000, linestyles='dotted')
+#plt.xlim(0, 1000)
+#plt.show()
+
 # other references:
 # https://github.com/pymc-devs/pymc3/issues/884
 # https://github.com/pymc-devs/pymc3/issues/555
@@ -118,6 +138,22 @@ except:
 # https://stackoverflow.com/questions/41909711/pymc3-nuts-sampling-multiple-hierarchical-model-wishart-distribution
 # https://stackoverflow.com/questions/33661064/pymc3-hierarchical-model-with-multiple-obsesrved-variables
 # https://am207.github.io/2017/wiki/Lab7_bioassay.html#convergence-diagnostics
+# https://stackoverflow.com/questions/37779004/hierarchical-linear-regression-in-pymc3-converging-issues
 
 
 # pickle output
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+ppc = pm.sample_ppc(trace, samples=500, model=Clark_Bayes, size=100)
+plt.figure()
+ax = plt.subplot()
+sns.distplot([n.mean() for n in ppc['log_y_ik']], kde=False, ax=ax)
+sns.distplot([n.mean() for n in ppc['log_y_ik']], kde=True, ax=ax)
+#ax.axvline(data.mean())
+ax.set(title='Posterior predictive of the mean', xlabel='mean(x)', ylabel='Frequency');
+
+
+res = []
+for i in range(n_iter):
+    res.append(ppc['log_y_ik'][0][i][7])
